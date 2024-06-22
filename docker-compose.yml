@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: postgres:16
+    container_name: edms-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: edms_local
+      POSTGRES_USER: my_user
+      POSTGRES_PASSWORD: my_password
+    volumes:
+      - /opt/docker-mounts/edms-local/db/data:/var/lib/postgresql/data
