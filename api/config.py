@@ -6,7 +6,7 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 
-DEV_MODE: bool = False
+DEV_MODE: bool = env.get("DEV_MODE", False)
 VERSION: str = env.get("version", "0.0.1")
 DATABASE_URI: str = env.get("DATABASE_URI")
 SECRET_KEY: str = env.get("SECRET_KEY")

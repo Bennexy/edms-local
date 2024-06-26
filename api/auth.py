@@ -1,4 +1,5 @@
 import sys
+from uuid import UUID
 
 sys.path.append(".")
 
@@ -13,8 +14,9 @@ api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=False)
 
 
 async def validate_token(auth_key_header: str = Security(api_key_header)) -> User:
-    # if DEV_MODE:
-    #     return User.get_user_by_id()
+    if DEV_MODE:
+        return User.get_user_by_id(UUID("2e6f79c7-fa36-4f72-8321-c608ca4f2e30"))
+
     if auth_key_header is None:
         raise ServerHTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="No Key passed"

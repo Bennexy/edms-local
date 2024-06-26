@@ -8,15 +8,15 @@ from fastapi import FastAPI
 
 sys.path.append(".")
 
-from api.auth import validate_token
+from api.auth import validate_token  # noqa: F401
 
 from api.config import VERSION
 
-app = FastAPI(docs_url="/", title="Dear Diary", version=VERSION)
+app = FastAPI(docs_url="/", title="EDMS", version=VERSION)
 
-from api.routers.files.router import router as file_router
-from api.routers.users.router import router as user_router
-from api.routers.auth.router import router as auth_router
+from api.routers.files.router import router as file_router  # noqa: E402
+from api.routers.users.router import router as user_router  # noqa: E402
+from api.routers.auth.router import router as auth_router  # noqa: E402
 
 app.include_router(file_router)
 app.include_router(user_router)
@@ -39,12 +39,6 @@ async def exception_handler(request, exe):
     return JSONResponse(
         status_code=422,
         content=error,
-        # {
-        #     'success': False,
-        #     'message': error[0]['msg'],
-        #     'error-type': f'ValidationError',
-        #     'error': error
-        # }
     )
 
 

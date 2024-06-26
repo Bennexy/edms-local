@@ -6,6 +6,7 @@ import uuid
 import datetime
 from fastapi import status
 from sqlalchemy import (
+    ARRAY,
     Column,
     UUID,
     Index,
@@ -21,7 +22,9 @@ from sqlalchemy.orm import relationship, Mapped
 from sqlalchemy_utils.types import TSVectorType
 from sqlalchemy_searchable import make_searchable, search
 from werkzeug.security import check_password_hash, generate_password_hash
-
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.orm import joinedload
 
 sys.path.append(".")
 from logger import get_logger
@@ -41,34 +44,43 @@ class FileText(Base):
         Index("ix_file_search_vector", "search_vector", postgresql_using="gin"),
     )
 
-    id: Mapped[UUID] = Column(
+    id: UUID = Column(
         UUID(as_uuid=True),
         primary_key=True,
         index=True,
         nullable=False,
         default=uuid.uuid4(),
     )
-    file_id: Mapped[UUID] = Column(
+    file_id: UUID = Column(
         UUID(as_uuid=True),
         ForeignKey("files.id"),
         nullable=False,
         index=True,
         unique=True,
     )
+    user_id: UUID = Column(UUID(as_uuid=True), nullable=False, index=True)
 
-    file_text: Mapped[str] = Column(Text, nullable=True)
+    file_text: list[str] = Column(ARRAY(String), nullable=True)
 
     # Full-text search vector
-    search_vector: Mapped[str] = Column(TSVectorType("file_text"))
+    _search_vector = Column(
+        TSVECTOR,
+        name="search_vector",
+        nullable=False,
+    )
 
-    created_on: Mapped[DateTime] = Column(
-        DateTime(), nullable=False, server_default=func.now()
-    )
-    last_modified_on: Mapped[DateTime] = Column(
-        DateTime(), nullable=True, onupdate=func.now()
-    )
-    deleted_on: Mapped[DateTime] = Column(DateTime(), nullable=True)
-    deleted: Mapped[Boolean] = Column(Boolean(), nullable=False, default=False)
+    @hybrid_property
+    def search_vector(self):
+        return self._search_vector
+
+    @search_vector.expression
+    def search_vector(cls):
+        return func.to_tsvector("german", func.array_to_string(cls.file_text, " "))
+
+    created_on: DateTime = Column(DateTime(), nullable=False, server_default=func.now())
+    last_modified_on: DateTime = Column(DateTime(), nullable=True, onupdate=func.now())
+    deleted_on: DateTime = Column(DateTime(), nullable=True)
+    deleted: Boolean = Column(Boolean(), nullable=False, default=False)
 
     file: Mapped["Files"] = relationship(
         "Files",
@@ -79,18 +91,74 @@ class FileText(Base):
 
     @db
     @staticmethod
-    def new(file_id: UUID, db: DB, file_text: str | None = None) -> UUID:
+    def new(file_id: UUID, user: User, db: DB = DB) -> UUID:
         id = uuid.uuid4()
         file_text = FileText()
 
         file_text.id = id
         file_text.file_id = file_id
-        file_text.file_text = file_text
+        file_text.user_id = user.id
+        file_text.file_text = [""]
+        file_text._search_vector = FileText.generate_ts_search_vector([""])
 
         db.add(file_text)
         db.commit()
 
         return id
+
+    @classmethod
+    def create(cls, file_id: UUID, user: User) -> Self:
+        id = cls.new(file_id, user)
+
+        return cls.get(id)
+
+    @db
+    @staticmethod
+    def get(id: UUID, user: User, db: DB) -> "FileText":
+        return (
+            db.query(FileText)
+            .filter(FileText.id == id, FileText.user_id == user.id)
+            .first()
+        )
+
+    @db
+    @staticmethod
+    def get_by_file_id(id: UUID, user: User, db: DB) -> "FileText":
+        return (
+            db.query(FileText)
+            .filter(FileText.file_id == id, FileText.user_id == user.id)
+            .first()
+        )
+
+    @staticmethod
+    def generate_ts_search_vector(text: list[str]) -> str:
+        con = func.array_to_string(text, " ")
+        return func.to_tsvector("german", con)
+
+    @db
+    @staticmethod
+    def find_by_text(user: User, text: str, db: DB) -> list[UUID]:
+        res = list()
+        for element in (
+            db.query(FileText)
+            .where(FileText.search_vector.match(text))
+            .filter(FileText.user_id == user.id)
+            .all()
+        ):
+            res.append(element.file_id)
+
+        return res
+
+    @db
+    def save_file_text(self, text: list[str], db: DB) -> Self:
+        self.file_text = text
+
+        self._search_vector = self.generate_ts_search_vector(text)
+        db.add(self)
+        db.commit()
+        db.refresh(self)
+
+        return self
 
     @db
     def delete(self, db: DB) -> Self:
@@ -106,27 +174,21 @@ class FileText(Base):
 class Files(Base):
     __tablename__ = "files"
 
-    id: Mapped[UUID] = Column(
+    id: UUID = Column(
         UUID(as_uuid=True),
         primary_key=True,
         index=True,
         nullable=False,
         default=uuid.uuid4(),
     )
-    user_id: Mapped[UUID] = Column(
-        UUID(as_uuid=True), nullable=False, index=True, unique=False
-    )
+    user_id: UUID = Column(UUID(as_uuid=True), nullable=False, index=True, unique=False)
 
-    filename: Mapped[str] = Column(String(length=255), nullable=False, index=True)
+    filename: str = Column(String(length=255), nullable=False, index=True)
 
-    created_on: Mapped[DateTime] = Column(
-        DateTime(), nullable=False, server_default=func.now()
-    )
-    last_modified_on: Mapped[DateTime] = Column(
-        DateTime(), nullable=True, onupdate=func.now()
-    )
-    deleted_on: Mapped[DateTime] = Column(DateTime(), nullable=True)
-    deleted: Mapped[Boolean] = Column(Boolean(), nullable=False, default=False)
+    created_on: DateTime = Column(DateTime(), nullable=False, server_default=func.now())
+    last_modified_on: DateTime = Column(DateTime(), nullable=True, onupdate=func.now())
+    deleted_on: DateTime = Column(DateTime(), nullable=True)
+    deleted: Boolean = Column(Boolean(), nullable=False, default=False)
 
     file_text: Mapped[FileText] = relationship(
         "FileText",
@@ -135,24 +197,52 @@ class Files(Base):
         uselist=False,
     )
 
-    @staticmethod
-    def new(user: User, filename: str, id: None | UUID = None, db: DB = None) -> UUID:
+    @classmethod
+    @db
+    def new(
+        cls, user: User, filename: str, id: None | UUID = None, db: DB = None
+    ) -> Self:
         if id is None:
             id = uuid.uuid4()
 
-        file = Files()
+        file = cls()
 
         file.id = id
         file.user_id = user.id
         file.filename = filename
 
-        file.file_text_id = FileText.new(id, db=db, file_text=None)
-
         db.add(file)
         db.commit()
+        FileText.new(id, user)
 
-        return id
+        db.refresh(file)
+
+        return file
 
     @db
     def get_without_text(user: User, id: UUID, db: DB) -> "Files":
-        db.query(Files).filter(Files.id == id, Files.user == user)
+        return db.query(Files).filter(Files.id == id, Files.user_id == user.id).first()
+
+    @db
+    @staticmethod
+    def get_with_text(user: User, id: UUID, db: DB) -> "Files":
+        return (
+            db.query(Files)
+            .options(joinedload(Files.file_text))
+            .filter(Files.id == id, Files.user_id == user.id)
+            .first()
+        )
+
+    @staticmethod
+    def find_by_text(user: User, text: str) -> list[UUID]:
+        return FileText.find_by_text(user, text)
+
+    @db
+    @staticmethod
+    def list_all(user: User, db: DB) -> list["Files"]:
+        return (
+            db.query(Files)
+            .options(joinedload(Files.file_text))
+            .filter(Files.user_id == user.id)
+            .all()
+        )

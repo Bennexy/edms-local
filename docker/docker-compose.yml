@@ -1,0 +1,57 @@
+version: '3'
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: postgres:16
+    container_name: edms-postgres
+    networks:
+      - isolated_network
+    environment:
+      POSTGRES_DB: edms_local
+      POSTGRES_USER: my_user
+      POSTGRES_PASSWORD: my_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U my_user -d edms_local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  
+  edms-local:
+    container_name: edms-backend
+    build: 
+      context: ../.
+      dockerfile: dockerfile
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: edms_local
+      POSTGRES_USER: my_user
+      POSTGRES_PASSWORD: my_password
+    
+    ports:
+      - "8080:8080"
+    networks:
+      - isolated_network
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+
+
+volumes:
+  - postgres_data
+
+
+networks:
+  isolated_network:
+    driver: bridge

@@ -13,6 +13,7 @@ sys.path.append(".")
 config = context.config
 from api.config import DATABASE_URI
 
+# used to avoid setting the db url in alembic.ini
 config.set_main_option("sqlalchemy.url", DATABASE_URI)
 
 # Interpret the config file for Python logging.

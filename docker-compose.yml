@@ -1,7 +1,10 @@
+# Docker-compose file for development database
+
 version: '3'
 
 services:
   postgres:
+    profile: db-only
     restart: unless-stopped
     image: postgres:16
     container_name: edms-postgres
@@ -12,4 +15,6 @@ services:
       POSTGRES_USER: my_user
       POSTGRES_PASSWORD: my_password
     volumes:
-      - /opt/docker-mounts/edms-local/db/data:/var/lib/postgresql/data
+      - /opt/docker-mounts/edms-local/db/data:/var/lib/postgresql/data # my local data store path
+  
+  edms-local
