@@ -3,4 +3,4 @@
 venv
 alembic.ini
 logs
-files
+/files
