@@ -23,7 +23,12 @@ You need to create a `.env` file that contains following values:
 [poppler-utils](https://poppler.freedesktop.org/) - Pillow pdf2image dependency ```sudo apt install poppler-utils```
 
 
+## DB-Migration
+Create alembic version: `./revision`
+Apply revision: `alembic upgrade head`
+
 ## Improvements
+- [ ] Set up dockerization
 - [ ] Implement Language detection
 - [ ] Implement multi language full text search (depends on language detection)
 - [x] Implement pdf compression

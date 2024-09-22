@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     RowMapping,
 )
+from langdetect import detect
 from sqlalchemy.orm import relationship, Mapped
 from sqlalchemy_utils.types import TSVectorType
 from sqlalchemy_searchable import make_searchable, search
@@ -27,6 +28,7 @@ from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import joinedload
 
 sys.path.append(".")
+from api.modules.language.languages import Languages
 from logger import get_logger
 from api.config import SECRET_KEY
 from api.db.database import db, DB, Base
@@ -137,7 +139,7 @@ class FileText(Base):
 
     @db
     @staticmethod
-    def find_by_text(user: User, text: str, db: DB) -> list[UUID]:
+    def find_by_text(user: User, text: str, db: DB) -> list[Self]:
         res = list()
         for element in (
             db.query(FileText)
@@ -145,15 +147,14 @@ class FileText(Base):
             .filter(FileText.user_id == user.id)
             .all()
         ):
-            res.append(element.file_id)
+            res.append(element)
 
         return res
 
     @db
-    def save_file_text(self, text: list[str], db: DB) -> Self:
+    def save_file_text(self, text: list[str], db: DB = DB) -> Self:
         self.file_text = text
-
-        self._search_vector = self.generate_ts_search_vector(text)
+        self._search_vector = self.generate_ts_search_vector(text, self.language)
         db.add(self)
         db.commit()
         db.refresh(self)
@@ -170,6 +171,22 @@ class FileText(Base):
 
         return self
 
+    @staticmethod
+    def detect_language(text):
+        try:
+            return detect(text)
+        except Exception:
+            return "english"  # Default to English if detection fails
+
+    @staticmethod
+    def get_tsvector_language(language_code):
+        if language_code == "de":
+            return "german"
+        elif language_code == "en":
+            return "english"
+        else:
+            return "english"  # Default to English
+
 
 class Files(Base):
     __tablename__ = "files"
@@ -184,6 +201,14 @@ class Files(Base):
     user_id: UUID = Column(UUID(as_uuid=True), nullable=False, index=True, unique=False)
 
     filename: str = Column(String(length=255), nullable=False, index=True)
+    language: Languages = Column(String(length=2), nullable=False, default="")
+    # Will be added later in the project
+    # document_type: Mapped[DocumentType] = relationship(
+    #     "DocumentType",
+    #     back_populates="file",
+    #     lazy="selectin",
+    #     uselist=False,
+    # )
 
     created_on: DateTime = Column(DateTime(), nullable=False, server_default=func.now())
     last_modified_on: DateTime = Column(DateTime(), nullable=True, onupdate=func.now())
@@ -235,7 +260,7 @@ class Files(Base):
 
     @staticmethod
     def find_by_text(user: User, text: str) -> list[UUID]:
-        return FileText.find_by_text(user, text)
+        return [file.id for file in FileText.find_by_text(user, text)]
 
     @db
     @staticmethod

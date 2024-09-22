@@ -4,7 +4,6 @@ version: '3'
 
 services:
   postgres:
-    profile: db-only
     restart: unless-stopped
     image: postgres:16
     container_name: edms-postgres
@@ -17,4 +16,3 @@ services:
     volumes:
       - /opt/docker-mounts/edms-local/db/data:/var/lib/postgresql/data # my local data store path
   
-  edms-local

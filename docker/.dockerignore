@@ -1,0 +1,8 @@
+venv
+alembic.ini
+*/docker-compose.yml
+*/__pycache__
+logs
+.env
+.vscode
+files

@@ -4,8 +4,16 @@ import time
 from pathlib import Path
 from typing import Self
 from uuid import UUID
-from fastapi import APIRouter, Depends, File as FastFile, UploadFile
+from fastapi import APIRouter, Depends, File as FastFile, UploadFile, BackgroundTasks
 from pydantic import BaseModel, Field
+
+from api.modules.language.languages import Languages
+from api.routers.files.models import (
+    FileOcrResponse,
+    FileResponse,
+    FileUploadRequest,
+    FileUploadResponse,
+)
 
 
 sys.path.append(".")
@@ -14,71 +22,7 @@ from api.db.models.users import User
 from api.modules.file.pdffile import PDFFile, FilesDB
 from api.exceptions.file import InvalidFileFormatException
 
-router = APIRouter(prefix="/files")
-
-from api.config import BASE_FILE_DIR  # noqa: E402
-
-
-@router.get("/base_path")
-async def get_base_path() -> str:
-    return BASE_FILE_DIR.as_posix()
-
-
-class FileUploadResponse(BaseModel):
-    id: UUID
-    path: Path
-
-    @staticmethod
-    def from_pdffile(pdffile: PDFFile) -> Self:
-        return FileUploadResponse(id=pdffile.db_file.id, path=pdffile.path)
-
-
-class FileOcrResponse(BaseModel):
-    id: UUID
-    success: bool = True
-    message: str = None
-    ocr_path: Path
-    process_time: float = Field(description="Proccessing time in seconds")
-    ocr_time: float = Field(description="Time in seconds spent at ocring the pdf")
-    full_text_search_creation_time: float = Field(
-        description="Time in seconds spend at reading and saveing the text from the ocred pdf"
-    )
-
-    file_size: float
-    ocr_file_size: float
-
-    @staticmethod
-    def from_pdffile(
-        pdffile: PDFFile,
-        process_time: float,
-        ocr_time: float,
-        full_text_search_creation_time: float,
-    ) -> Self:
-        return FileOcrResponse(
-            id=pdffile.db_file.id,
-            ocr_path=pdffile.ocr_path,
-            process_time=process_time,
-            ocr_time=ocr_time,
-            full_text_search_creation_time=full_text_search_creation_time,
-            file_size=get_file_size_mb(pdffile.path),
-            ocr_file_size=get_file_size_mb(pdffile.ocr_path),
-        )
-
-
-class FileResponse(BaseModel):
-    id: UUID
-    file_name: str
-    file_text: list[str]
-
-
-class FileUploadRequest(BaseModel):
-    filename: str | None = None
-
-
-def get_file_size_mb(file_path) -> float:
-    size_bytes = os.path.getsize(file_path)
-    size_mb = size_bytes / 1024 / 1024
-    return float("{:.2f}".format(size_mb))
+router = APIRouter(prefix="/files", tags=["Files"])
 
 
 @router.post("/upload", response_model=FileUploadResponse)
@@ -101,13 +45,44 @@ async def upload_file(
     return FileUploadResponse.from_pdffile(file)
 
 
+@router.post(
+    "/async_upload",
+    response_model=FileUploadResponse,
+    description="Upload the file, then process in the background",
+)
+async def async_upload_file(
+    background_task: BackgroundTasks,
+    file_upload_request: FileUploadRequest = Depends(FileUploadRequest),
+    file_data: UploadFile = FastFile(...),
+    user: User = Depends(validate_token),
+) -> FileUploadResponse:
+    if not PDFFile.is_pdf_file(file_data):
+        raise InvalidFileFormatException(file_data, "musst be a pdf!")
+
+    if file_upload_request.filename is not None:
+        if not file_upload_request.filename.lower().endswith(".pdf"):
+            file_upload_request.filename += ".pdf"
+        file_data.filename = file_upload_request.filename
+
+    file = PDFFile.new(user, file_data)
+    file.save()
+
+    background_task.add_task(
+        ocr_file(file.db_file.id, file_upload_request.force_ocr, user)
+    )
+
+    return FileUploadResponse.from_pdffile(file)
+
+
 @router.post("/ocr", response_model=FileOcrResponse)
-async def ocr_file(id: UUID, user: User = Depends(validate_token)) -> FileOcrResponse:
+async def ocr_file(
+    id: UUID, force: bool = False, user: User = Depends(validate_token)
+) -> FileOcrResponse:
     process_start = time.time()
     file = PDFFile.load(user, id)
 
     ocr_start = time.time()
-    file.ocr()
+    file.ocr(force)
     full_text_start = time.time()
     file.write_text_to_db(user)
     process_end = time.time()
@@ -151,3 +126,26 @@ async def get_file_full_text_search(
     text: str, user: User = Depends(validate_token)
 ) -> list[UUID]:
     return FilesDB.find_by_text(user, text)
+
+
+# @router.put("/update")
+# async def update_file_data(
+#     id: UUID,
+#     filename: None | str = None,
+#     language: None | Languages = None,
+#     user: User = Depends(validate_token)
+# ):
+
+
+@router.get("/detect_language", response_model=str)
+async def detect_file_language(
+    file_id: UUID, user: User = Depends(validate_token)
+) -> str:
+    return FilesDB.get_with_text(user, id).detect_language()
+
+
+@router.post("/set_language", response_model=Languages)
+async def set_file_language(
+    file_id: UUID, language: Languages, user: User = Depends(validate_token)
+) -> str:
+    return language
