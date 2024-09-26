@@ -16,18 +16,18 @@ from sqlalchemy import (
     Text,
     func,
     ForeignKey,
-    RowMapping,
 )
-from langdetect import detect
 from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy_utils.types import TSVectorType
-from sqlalchemy_searchable import make_searchable, search
-from werkzeug.security import check_password_hash, generate_password_hash
+
+# from sqlalchemy_utils.types import TSVectorType
+# from sqlalchemy_searchable import make_searchable, search
+# from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import joinedload
 
 sys.path.append(".")
+from api.modules.language.detect_language import detect_language
 from api.modules.language.languages import Languages
 from logger import get_logger
 from api.config import SECRET_KEY
@@ -62,7 +62,10 @@ class FileText(Base):
     )
     user_id: UUID = Column(UUID(as_uuid=True), nullable=False, index=True)
 
-    file_text: list[str] = Column(ARRAY(String), nullable=True)
+    file_text: list[str] = Column(ARRAY(Text), nullable=True)
+    file_language: Languages = Column(
+        String(length=31), nullable=False, server_default=Languages.ENGLISH
+    )
 
     # Full-text search vector
     _search_vector = Column(
@@ -101,7 +104,9 @@ class FileText(Base):
         file_text.file_id = file_id
         file_text.user_id = user.id
         file_text.file_text = [""]
-        file_text._search_vector = FileText.generate_ts_search_vector([""])
+        file_text._search_vector = FileText.generate_ts_search_vector(
+            file_text.file_text
+        )
 
         db.add(file_text)
         db.commit()
@@ -133,9 +138,9 @@ class FileText(Base):
         )
 
     @staticmethod
-    def generate_ts_search_vector(text: list[str]) -> str:
+    def generate_ts_search_vector(text: list[str], language: Languages) -> str:
         con = func.array_to_string(text, " ")
-        return func.to_tsvector("german", con)
+        return func.to_tsvector(language.language_name, con)
 
     @db
     @staticmethod
@@ -152,9 +157,10 @@ class FileText(Base):
         return res
 
     @db
-    def save_file_text(self, text: list[str], db: DB = DB) -> Self:
+    def update_file_text(self, text: list[str], db: DB = DB) -> Self:
         self.file_text = text
-        self._search_vector = self.generate_ts_search_vector(text, self.language)
+        self.file_language = detect_language(self.file_text)
+        self._search_vector = self.generate_ts_search_vector(text, self.file_language)
         db.add(self)
         db.commit()
         db.refresh(self)
@@ -171,22 +177,6 @@ class FileText(Base):
 
         return self
 
-    @staticmethod
-    def detect_language(text):
-        try:
-            return detect(text)
-        except Exception:
-            return "english"  # Default to English if detection fails
-
-    @staticmethod
-    def get_tsvector_language(language_code):
-        if language_code == "de":
-            return "german"
-        elif language_code == "en":
-            return "english"
-        else:
-            return "english"  # Default to English
-
 
 class Files(Base):
     __tablename__ = "files"
@@ -201,7 +191,6 @@ class Files(Base):
     user_id: UUID = Column(UUID(as_uuid=True), nullable=False, index=True, unique=False)
 
     filename: str = Column(String(length=255), nullable=False, index=True)
-    language: Languages = Column(String(length=2), nullable=False, default="")
     # Will be added later in the project
     # document_type: Mapped[DocumentType] = relationship(
     #     "DocumentType",
@@ -264,7 +253,12 @@ class Files(Base):
 
     @db
     @staticmethod
-    def list_all(user: User, db: DB) -> list["Files"]:
+    def list_all_without_text(user: User, db: DB) -> list["Files"]:
+        return db.query(Files).filter(Files.user_id == user.id).all()
+
+    @db
+    @staticmethod
+    def list_all_with_text(user: User, db: DB) -> list["Files"]:
         return (
             db.query(Files)
             .options(joinedload(Files.file_text))

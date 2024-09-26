@@ -21,7 +21,7 @@ You need to create a `.env` file that contains following values:
 [pngquant](https://pngquant.org/) - image optimizations ```sudo apt install pngquant```
 [unpaper](https://github.com/unpaper/unpaper) - Clean image background ```sudo apt install unpaper```
 [poppler-utils](https://poppler.freedesktop.org/) - Pillow pdf2image dependency ```sudo apt install poppler-utils```
-
+[ghostscript](https://ghostscript.readthedocs.io/en/latest/Install.html) - OCRmyPDF dependency
 
 ## DB-Migration
 Create alembic version: `./revision`
@@ -37,45 +37,3 @@ Apply revision: `alembic upgrade head`
 - [ ] Oauth authentication
 
 
-
-
-For language detection try this
-```
-from langdetect import detect
-from sqlalchemy import create_engine, Column, Integer, Text, func
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.dialects.postgresql import TSVECTOR
-
-Base = declarative_base()
-
-class FileText(Base):
-    __tablename__ = 'file_text'
-
-    id = Column(Integer, primary_key=True)
-    file_id = Column(Integer)
-    file_text = Column(Text)
-    _search_vector = Column(TSVECTOR, name='search_vector', nullable=False)
-
-    @staticmethod
-    def detect_language(text):
-        try:
-            return detect(text)
-        except:
-            return 'english'  # Default to English if detection fails
-
-    @staticmethod
-    def get_tsvector_language(language_code):
-        if language_code == 'de':
-            return 'german'
-        elif language_code == 'en':
-            return 'english'
-        else:
-            return 'english'  # Default to English
-
-    def update_search_vector(self):
-        language_code = self.detect_language(self.file_text)
-        tsvector_language = self.get_tsvector_language(language_code)
-        self._search_vector = func.to_tsvector(tsvector_language, self.file_text)
-
-```

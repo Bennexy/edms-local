@@ -7,10 +7,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File as FastFile, UploadFile, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from api.db.models.files import FileText
 from api.modules.language.languages import Languages
-from api.routers.files.models import (
+from api.routers.process.models import (
     FileOcrResponse,
     FileResponse,
+    FileTextResponse,
     FileUploadRequest,
     FileUploadResponse,
 )
@@ -97,26 +99,38 @@ async def ocr_file(
 
 @router.get("/get", response_model=FileResponse)
 async def get_file(id: UUID, user: User = Depends(validate_token)) -> FileResponse:
-    file = PDFFile.load(user, id)
+    file: FilesDB = FilesDB.get_without_text(user, id)
 
-    return FileResponse(
-        id=file.db_file.id,
-        file_name=file.db_file.filename,
-        file_text=file.db_file.file_text.file_text,
-    )
+    return FileResponse.from_files(file)
 
 
-@router.get("/list", response_model=list[FileResponse])
-async def list_all(user: User = Depends(validate_token)) -> list[UUID]:
-    files: list[FilesDB] = FilesDB.list_all(user)
+@router.get("/get_with_text", response_model=FileTextResponse)
+async def get_file_with_text(
+    id: UUID, user: User = Depends(validate_token)
+) -> FileResponse:
+    file: FilesDB = FilesDB.get_with_text(user, id)
+
+    return FileTextResponse.from_files(file)
+
+
+@router.get("/get_all", response_model=list[FileResponse])
+async def get_all(user: User = Depends(validate_token)) -> list[UUID]:
+    files: list[FilesDB] = FilesDB.list_all_without_text(user)
 
     ret = list()
     for file in files:
-        ret.append(
-            FileResponse(
-                id=file.id, file_name=file.filename, file_text=file.file_text.file_text
-            )
-        )
+        ret.append(FileResponse.from_files(file))
+
+    return ret
+
+
+@router.get("/get_all_with_text", response_model=list[FileTextResponse])
+async def get_all_files_with_text(user: User = Depends(validate_token)) -> FileResponse:
+    files: list[FilesDB] = FilesDB.list_all_with_text(user)
+
+    ret = list()
+    for file in files:
+        ret.append(FileTextResponse.from_files(file))
 
     return ret
 
@@ -138,10 +152,9 @@ async def get_file_full_text_search(
 
 
 @router.get("/detect_language", response_model=str)
-async def detect_file_language(
-    file_id: UUID, user: User = Depends(validate_token)
-) -> str:
-    return FilesDB.get_with_text(user, id).detect_language()
+async def detect_file_language(id: UUID, user: User = Depends(validate_token)) -> str:
+    file: FilesDB = FilesDB.get_with_text(user, id)
+    return FileText.detect_language(file.file_text.file_text).code()
 
 
 @router.post("/set_language", response_model=Languages)

@@ -19,10 +19,16 @@ class Languages(StrEnum):
     TURKISH = ("turkish", "tr")
     SIMPLE = ("simple", "simple")
 
+    def __init__(self, language_name: str, language_code: str) -> None:
+        super().__init__()
+        self.language_name: str = language_name
+        self.language_code: str = language_code
+
     def __new__(cls, language_name, language_code):
         obj = str.__new__(cls, language_name)
         obj._value_ = language_name
         obj.language_code = language_code
+        obj.language_name = language_name
         return obj
 
     @classmethod
@@ -42,7 +48,12 @@ class Languages(StrEnum):
             return self.value == other or self.language_code == other
         return NotImplemented
 
+    def code(self) -> str:
+        return self.language_code
+
 
 if __name__ == "__main__":
-    assert Languages("german") == Languages("de")
-    assert Languages("german") == Languages.GERMAN
+    assert Languages.GERMAN == Languages("de")
+    assert Languages.GERMAN == Languages("german")
+    assert Languages.GERMAN == "de"
+    assert Languages.GERMAN == "german"

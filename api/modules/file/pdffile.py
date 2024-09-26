@@ -108,4 +108,4 @@ class PDFFile:
         text: list[str] = extract_text_from_pdf(self._ocr_path)
 
         ft: FileTextDB = FileTextDB.get_by_file_id(self.db_file.id, user)
-        ft.save_file_text(text)
+        ft.update_file_text(text)
