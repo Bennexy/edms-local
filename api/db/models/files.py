@@ -71,7 +71,7 @@ class FileText(Base):
     _search_vector = Column(
         TSVECTOR,
         name="search_vector",
-        nullable=False,
+        nullable=True,
     )
 
     @hybrid_property
@@ -96,16 +96,26 @@ class FileText(Base):
 
     @db
     @staticmethod
-    def new(file_id: UUID, user: User, db: DB = DB) -> UUID:
+    def new(
+        file_id: UUID,
+        user: User,
+        text: list[str] | None = None,
+        file_language: Languages | None = None,
+        db: DB = DB,
+    ) -> UUID:
         id = uuid.uuid4()
         file_text = FileText()
 
         file_text.id = id
         file_text.file_id = file_id
         file_text.user_id = user.id
-        file_text.file_text = [""]
+        file_text.file_text = text
+        file_text.file_language = (
+            file_language if file_language else detect_language(file_text.file_text)
+        )
+
         file_text._search_vector = FileText.generate_ts_search_vector(
-            file_text.file_text
+            file_text.file_text, file_text.file_language
         )
 
         db.add(file_text)
@@ -138,7 +148,10 @@ class FileText(Base):
         )
 
     @staticmethod
-    def generate_ts_search_vector(text: list[str], language: Languages) -> str:
+    def generate_ts_search_vector(text: list[str] | None, language: Languages) -> str:
+        if text is None:
+            return
+
         con = func.array_to_string(text, " ")
         return func.to_tsvector(language.language_name, con)
 
@@ -157,9 +170,15 @@ class FileText(Base):
         return res
 
     @db
-    def update_file_text(self, text: list[str], db: DB = DB) -> Self:
+    def update_file_text(
+        self, text: list[str], language: Languages | None = None, db: DB = DB
+    ) -> Self:
         self.file_text = text
-        self.file_language = detect_language(self.file_text)
+        if language is not None:
+            self.file_language = language
+        else:
+            self.file_language = detect_language(self.file_text)
+
         self._search_vector = self.generate_ts_search_vector(text, self.file_language)
         db.add(self)
         db.commit()
@@ -247,9 +266,18 @@ class Files(Base):
             .first()
         )
 
+    @db
     @staticmethod
-    def find_by_text(user: User, text: str) -> list[UUID]:
-        return [file.id for file in FileText.find_by_text(user, text)]
+    def find_by_text(user: User, text: str, db: DB) -> list[UUID]:
+        files = (
+            db.query(Files)
+            .options(joinedload(Files.file_text))
+            .where(FileText.search_vector.match(text))
+            .filter(Files.user_id == user.id)
+            .with_entities(Files)
+            .all()
+        )
+        return [file.id for file in files]  # [file.id for file in files]
 
     @db
     @staticmethod

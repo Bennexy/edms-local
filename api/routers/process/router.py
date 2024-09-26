@@ -154,7 +154,7 @@ async def get_file_full_text_search(
 @router.get("/detect_language", response_model=str)
 async def detect_file_language(id: UUID, user: User = Depends(validate_token)) -> str:
     file: FilesDB = FilesDB.get_with_text(user, id)
-    return FileText.detect_language(file.file_text.file_text).code()
+    return FileText.detect_language(file.file_text.file_text)
 
 
 @router.post("/set_language", response_model=Languages)

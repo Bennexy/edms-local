@@ -10,7 +10,13 @@ class Detected(TypedDict):
     encoding: str
 
 
-def detect_language(text: bytes | str | list[str]) -> Languages:
+def detect_language(text: bytes | str | list[str] | None) -> Languages:
+    """
+    defaults to Languages.ENGLISH
+    """
+    if text is None:
+        return Languages.ENGLISH
+
     if isinstance(text, str):
         text = text.encode()
     elif isinstance(text, list):
@@ -19,5 +25,7 @@ def detect_language(text: bytes | str | list[str]) -> Languages:
             text = text.encode()
 
     detected: Detected = detect(text)
-
-    return Languages(detected["language"].lower())
+    try:
+        return Languages(detected["language"].lower())
+    except ValueError:
+        return Languages.ENGLISH

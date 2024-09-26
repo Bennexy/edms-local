@@ -23,9 +23,6 @@ class File(UploadFile):
 
         self.id = id if id is not None else uuid.uuid4()
 
-    def is_pdf(self) -> bool:
-        self.filename.endswith(".pdf")
-
     def update_filename(self, filename: str | None) -> None:
         if filename is None:
             return
@@ -33,6 +30,11 @@ class File(UploadFile):
         if not filename.lower().endswith(".pdf"):
             filename += ".pdf"
             self.filename = filename
+
+    async def is_pdf(self) -> bool:
+        header_bytes = await self.read(5)
+        await self.seek(0)
+        return header_bytes == b"%PDF-"
 
     @staticmethod
     async def get_file(file: UploadFile = FastApiFile(...)) -> "File":
@@ -53,20 +55,21 @@ class FileProcessor:
         with self.path.open("wb") as fw:
             fw.write(self.file.file.read())
 
-        self.file_text: list[str] = ocr.extract_text_from_pdf(self.path)
+        self.__set_file_text()
 
     def __del__(self):
         if self.delete_file:
             shutil.rmtree(self.folder_path.absolute())
 
+    def __set_file_text(self):
+        self.file_text = ocr.extract_text_from_pdf(
+            self.ocr_path if self.ocr_path.is_file() else self.path
+        )
+
     def has_text(self) -> bool:
         return self.file_text is not None or len(self.file_text) != 0
 
     def ocr(self, force: bool = False, skip_text: bool = True) -> None:
-        if not force and not skip_text and self.has_text():
-            self.ocr_path = self.path
-            return
-
         logger.info("ocring document")
         ocr.ocr_pdf(self.path, self.ocr_path, skip_text=skip_text, force=force)
-        self.file_text = ocr.extract_text_from_pdf(self.ocr_path)
+        self.__set_file_text()
